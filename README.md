@@ -4,7 +4,7 @@
 
 Beyond.NET is a toolset that makes it possible to call .NET code from other programming languages.
 Conceptually, think of it like the reverse of the Xamarin tools.
-Currently, C and Swift are the supported output languages. But any language that has C interoperability can use the generated bindings.
+Currently, C, Swift and Kotlin are the supported output languages. But any language that has C interoperability can use the generated bindings.
 
 
 
@@ -50,7 +50,7 @@ The generated C# code can then be compiled with .NET NativeAOT which allows the 
 
 ### Generator Modes
 
-The generator always generates language bindings (C header file and optionally a Swift source code file) but it can also be configured to automatically compile a native version of the target assembly.
+The generator always generates language bindings (C header file and optionally Swift and Kotlin source code files) but it can also be configured to automatically compile a native version of the target assembly.
 At the moment, automatic build support is only available on Apple platforms.
 
 If enabled, an [XCFramework](https://developer.apple.com/documentation/xcode/creating-a-multi-platform-binary-framework-bundle) containing compiled binaries for macOS ARM64, macOS x64, iOS ARM64, iOS Simulator ARM64 and iOS Simulator x64 is built. The generated XCFramework is ready to use and can just be dropped into an Xcode project.
@@ -291,7 +291,7 @@ Every .NET type that is not a primitive or an enum gets exposed as an "opaque ty
 
 By itself, those opaque types are pretty useless. To actually access instance properties, call methods or do anything useful with them, you need to call one of the generated methods and pass the instance as the first (`self`) parameter.
 
-In the Swift bindings, these opaque types are also used under the hood but not exposed to the consumer. So you can treat them as an implementation detail and use the generated APIs like regular Swift types.
+In the Swift and Kotlin bindings, these opaque types are also used under the hood but not exposed to the consumer. So you can treat them as an implementation detail and use the generated APIs like regular Swift/Kotlin types.
 
 
 
@@ -319,7 +319,7 @@ void WriteLine(System_String_t text, System_Exception_t* exception)
 
 When calling the `WriteLine` method from C, you should provide a reference to a `System_Exception_t` object which, after the method call will either be null or contain a value which indicates the method did throw.
 
-The code generator for Swift produces APIs annotated with the `throws` keyword so you can use Swift's native error handling when calling into .NET.
+The code generator for Swift produces APIs annotated with the `throws` keyword so you can use Swift's native error handling when calling into .NET. When targeting Kotlin, this is also abstracted away.
 
 **Swift:**
 ```swift
@@ -344,7 +344,7 @@ So if you, for instance obtain a reference to a `System.Guid` object by calling 
 
 Structs or other value types and delegates are no exception to this rule. Again, the only exceptions are primitive and enums. Also, it doesn't matter if you obtain an object by calling its constructor (`*_Create` functions in C) or through other means, you always have to destroy them at some point.
 
-When using the generated bindings for Swift, there's no need to deal with any of that. Instead we handle allocation and deallocation transparently and the standard Swift memory management rules apply. That means you can just treat .NET objects like regular Swift objects. That includes .NET delegates which are mapped to Swift closures.
+When using the generated bindings for Swift and Kotlin, there's no need to deal with any of that. Instead we handle allocation and deallocation transparently and the standard Swift/Kotlin memory management rules apply. That means you can just treat .NET objects like regular Swift/Kotlin objects. That includes .NET delegates which are mapped to Swift/Kotlin closures.
 
 
 
@@ -355,6 +355,8 @@ When using the C bindings, don't ever compare two pointers to .NET objects! Beca
 Instead, use the bindings for `System.Object.Equals` or `System.Object.ReferenceEquals` depending on the use case.
 
 In Swift, the `==` and `===` operators are overridden for .NET objects and call those functions respectively. So feel free to compare .NET objects in Swift like regular Swift objects.
+
+In Kotlin, only the `==` operator is overridden for .NET objects because as of now, Kotlin does not support overriding `===`. See the [Kotlin documentation](https://kotlinlang.org/docs/operator-overloading.html#equality-and-inequality-operators) for more information.
 
 
 
@@ -383,6 +385,8 @@ var favoriteNumber: Int32 { get throws }
 func favoriteNumber_set(_ value: Int32) throws
 ```
 
+In Kotlin, it's a similar story. We expose a proper getter but due to [Kotlin limitations](https://github.com/royalapplications/beyondnet/issues/81) we cannot provide a nice setter so we emit a function suffixed with `_set` instead.
+
 
 
 ## Type checking/casting
@@ -395,7 +399,7 @@ The same concept applies to casting using the C# `as` keyword and direct casts (
 
 Direct casts are exposed through the `DNObjectCastTo` method. It works the same as `DNObjectCastAs` but has a third argument which might hold a `System.Exception` object if the cast failed.
 
-In the Swift bindings, we have extension methods on `DNObject` (the base type for all generated class and struct bindings) which makes type checking/casting much easier:
+In the Swift (and Kotlin) bindings, we have extension methods on `DNObject` (the base type for all generated class and struct bindings) which makes type checking/casting much easier:
 
 ```swift
 let string = System.String.empty
@@ -424,7 +428,7 @@ There are also extensions for direct casts called `castTo`. These work the same 
 ## Method overloads, Member overrides, shadowed members
 
 Since C doesn't have the concept of inheritance, overridden and shadowed members are just redeclared for subclasses.
-In Swift, overridden or shadowed members are actually generated using the `override` keyword.
+In Swift and Kotlin, overridden or shadowed members are actually generated using the `override` keyword.
 
 Also, C doesn't support method overloading but in this case, the "fix" is not that easy.
 Take the following C# type for instance:
@@ -448,7 +452,7 @@ void OverloadTests_Print_1(System_DateTime_t value, System_Exception_t* outExcep
 void OverloadTests_Print_2(System_String_t value, System_Exception_t* outException);
 ```
 
-In Swift, we fortunately can do overloads just like in C# and so the Swift signatures for those functions look like this:
+In Swift (and similarly in Kotlin), we fortunately can do overloads just like in C# and so the Swift signatures for those functions look like this:
 
 ```swift
 class func print(_ value: Int32) throws
@@ -473,7 +477,7 @@ System_Object_t numberObj = DNObjectFromInt32(number);
 int32_t numberRet = DNObjectCastToInt32(numberObj, NULL); // TODO: Error handling
 ```
 
-In Swift we provide extension methods to convert back and forth between primitives and .NET objects. The same task can be achieved like this in Swift:
+In Swift (and similarly in Kotlin) we provide extension methods to convert back and forth between primitives and .NET objects. The same task can be achieved like this in Swift:
 
 ```swift
 let number: Int32 = 5
@@ -485,7 +489,7 @@ let numberRet = try numberObj.value // Or: try numberObj.castToInt32()
 
 ## Delegates and Events
 
-.NET Delegates and Events are mapped to C function pointers and Swift closures with some infrastructure around them to allow for proper memory management.
+.NET Delegates and Events are mapped to C function pointers and Swift/Kotlin closures with some infrastructure around them to allow for proper memory management.
 
 
 ### Delegates
@@ -603,7 +607,7 @@ I guess this is pretty self explanatory. Again, for brevity we omitted error han
 
 
 
-## Converting between .NET and Swift types
+## Converting between .NET and Swift/Kotlin types
 
 For very common types we provide convenience extensions to convert between the two worlds.
 That includes strings, dates, byte arrays (Swift `Data` objects), etc.
@@ -616,6 +620,13 @@ let swiftString = systemString.string()
 let systemStringRet = swiftString.dotNETString()
 ```
 
+And the same example in Kotlin:
+
+```kotlin
+val systemString = System.String.empty
+val kotlinString = systemString.toKString()
+val systemStringRet = kotlinString.toDotNETString()
+```
 
 
 ## .NET Interfaces in Swift
